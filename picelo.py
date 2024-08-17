@@ -33,12 +33,17 @@ class MainWindow(tk.Tk):
 
         menubar = tk.Menu(self)  # Conventional name
         self["menu"] = menubar
-        menu_file = tk.Menu(menubar, tearoff=False)
-        menubar.add_cascade(label="File", menu=menu_file)
-        menu_file.add_command(
+        self._menu_file = tk.Menu(menubar, tearoff=False)
+        menubar.add_cascade(label="File", menu=self._menu_file)
+        self._menu_file.add_command(
             label="Open directory", command=self.open_directory, accelerator="Ctrl+O"
         )
-        menu_file.add_command(label="Exit", command=self.destroy, accelerator="Esc")
+        self._menu_file.add_command(
+            label="Reset score", command=self.reset_score, state=tk.DISABLED
+        )
+        self._menu_file.add_command(
+            label="Exit", command=self.destroy, accelerator="Esc"
+        )
 
         menu_help = tk.Menu(menubar, tearoff=False)
         menubar.add_cascade(label="Help", menu=menu_help)
@@ -69,14 +74,14 @@ class MainWindow(tk.Tk):
         img_frame.pack(expand=True, fill=tk.BOTH)
 
     def open_directory(self, event=None):
-        if user_dir := filedialog.askdirectory(
+        if pic_dir := filedialog.askdirectory(
             parent=self, mustexist=True, title="Choose directory with pictures"
         ):
             # Remove unsupported formats
             pil_file_extensions = Image.registered_extensions().keys() - {".pdf"}
 
             # Recursive
-            for p in pathlib.Path(user_dir).glob("**/*"):
+            for p in pathlib.Path(pic_dir).glob("**/*"):
                 if p.suffix in pil_file_extensions:
                     self._fp_list.append(RankFile(p.resolve()))
 
@@ -93,6 +98,17 @@ class MainWindow(tk.Tk):
             print(f"{len(self._fp_list)} images to sort")
             self._rounds = 0  # Reset
             self.load_next()
+            self._menu_file.entryconfigure("Reset score", state=tk.NORMAL)
+
+    def reset_score(self):
+        resp = messagebox.askyesno(
+            title="Reset score",
+            message="Restore original file names?",
+            detail="Scores for current directory tree will be permanently lost.",
+        )
+        if resp:
+            for p in self._fp_list:
+                p.reset_name()
 
     def arrow_press(self, event=None):
         if event.keysym == "Left":
@@ -112,7 +128,7 @@ class MainWindow(tk.Tk):
             self._img_left.set_image(next(self._fp_list_iter))
             self._img_right.set_image(next(self._fp_list_iter))
         except StopIteration:
-            if self._rounds < 10:
+            if self._rounds < 3:
                 self._rounds += 1
                 print(f"Round {self._rounds}")
                 random.shuffle(self._fp_list)
@@ -216,9 +232,9 @@ class RankFile:
         if self._fp.stem.startswith("[") and "] " in self._fp.name:
             ratings, _, self._fp_clean_name = self._fp.name[1:].partition("] ")
             score, matches = (int(r) for r in ratings.split(","))
+            self.matches = matches
 
         self.score = score
-        self.matches = matches
 
     def filename(self) -> str:
         """Name with elo score prefix."""
@@ -227,6 +243,10 @@ class RankFile:
     def update_name(self):
         """Rename file according to current rating."""
         self._fp = self._fp.rename(self._fp.parent / self.filename())
+
+    def reset_name(self):
+        """Restore original file name without Elo prefix."""
+        self._fp = self._fp.rename(self._fp.parent / self._fp_clean_name)
 
     def get_fp(self) -> pathlib.Path:
         return self._fp
