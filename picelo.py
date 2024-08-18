@@ -3,12 +3,13 @@
 __description__ = """\
 Elo rating system for image sorting.
 
-Presents images in random order to user and renames it with Elo score.
+Open directory with images and press <Left> or <Right> arrow key to vote for a better image. Images will be presented in random order, each vote renames image according to Elo score. Three matching rounds will be performed.
+
+After matching, images could be observed in file manager, as they are named alphanumerically.
+
+    "[{elo_score},{total_matches}] filename".jpg
 
 https://www.coorpacademy.com/en/blog/learning-innovation-en/elo-whos-the-best/
-https://github.com/iain/elo?tab=readme-ov-file#label-About+the+K-factor
-
-https://stackoverflow.com/questions/38171036/make-two-frames-occupy-50-of-the-available-width-each
 """
 
 import pathlib
@@ -22,12 +23,15 @@ __software_name__ = "Picelo"
 
 
 class MainWindow(tk.Tk):
+    """Main window with controller."""
+
     def __init__(self):
         super().__init__()
         self.title(__software_name__)
         self.geometry("640x240")
 
-        self._fp_list = []
+        self._fp_list: list = list()
+        # Saves current ranking progress, new iteration on StopIteration
         self._fp_list_iter = iter(())
         self._rounds = 0
 
@@ -63,6 +67,7 @@ class MainWindow(tk.Tk):
         self.bind("<Left>", self.arrow_press)
         self.bind("<Right>", self.arrow_press)
 
+        # https://stackoverflow.com/questions/38171036/make-two-frames-occupy-50-of-the-available-width-each
         img_frame = ttk.PanedWindow(orient=tk.HORIZONTAL, style="Black.TPanedwindow")
         self._img_left = ImageView(img_frame)
         self._img_left._lbl["style"] = "Left.TLabel"
@@ -81,22 +86,18 @@ class MainWindow(tk.Tk):
             pil_file_extensions = Image.registered_extensions().keys() - {".pdf"}
 
             # Recursive
+            self._rounds = 0  # Start scoring again
+            self._fp_list = list()
             for p in pathlib.Path(pic_dir).glob("**/*"):
                 if p.suffix in pil_file_extensions:
-                    self._fp_list.append(RankFile(p.resolve()))
+                    self._fp_list.append(RankFileModel(p.resolve()))
 
             # Limit to 3 match rounds
-            # self._fp_list = list(filter(lambda k: k.matches < 3, [RankFile(k) for k in self._fp_list]))
+            # self._fp_list = list(filter(lambda k: k.matches < 3, [RankFileModel(k) for k in self._fp_list]))
             if not self._fp_list:
                 messagebox.showerror(message="Images not found")
 
-            # self._fp_list = self._fp_list * 3  # Three rounds
-            # Make image count even, so each image will have pair to compare with
-            # if len(self._fp_list) % 1:
-            #     self._fp_list.append(random.choise(self._fp_list))
-
             print(f"{len(self._fp_list)} images to sort")
-            self._rounds = 0  # Reset
             self.load_next()
             self._menu_file.entryconfigure("Reset score", state=tk.NORMAL)
 
@@ -111,12 +112,15 @@ class MainWindow(tk.Tk):
                 p.reset_name()
 
     def arrow_press(self, event=None):
-        if event.keysym == "Left":
-            self.title(self._img_right.elo.filename())
-            self._img_left.elo.wins_over(self._img_right.elo)
-        elif event.keysym == "Right":
-            self.title(self._img_left.elo.filename())
-            self._img_right.elo.wins_over(self._img_left.elo)
+        if event.keysym == "Left" and self._img_left:
+            self.title(self._img_left.model.filename())
+            self._img_left.model.wins_over(self._img_right.model)
+        elif event.keysym == "Right" and self._img_right:
+            self.title(self._img_right.model.filename())
+            self._img_right.model.wins_over(self._img_left.model)
+
+        if not any((self._img_left, self._img_right)):
+            self.title(__software_name__)
         self.load_next()
 
     def load_next(self):
@@ -135,42 +139,41 @@ class MainWindow(tk.Tk):
                 self._fp_list_iter = iter(self._fp_list)
                 self.load_next()
             else:
-                self._img_left.set_image("")
-                self._img_right.set_image("")
-                # self.destroy()
+                self._img_left.unset_image()
+                self._img_right.unset_image()
 
 
 class ImageView(ttk.Frame):
     """Tkinter image viewer.
 
-    Keep aspect ratio
-    Zoom controls
+    PIL.ImageTk.PhotoImage doesn't have `.blank()` method, but tk.PhotoImage does.
     """
 
     def __init__(self, master=None):
         super().__init__(master)
-        self.elo: RankFile = None
-        self._img: Image | None = None  # Cached image for resize
+        self.model: RankFileModel = None
+        self._img: Image | None  # Cached image for resize
         self._img_tk: ImageTk.PhotoImage  # Keep reference for GC
-        self._lbl = ttk.Label(
-            self, text="No image", compound=tk.BOTTOM, anchor=tk.CENTER
-        )
+        self._lbl = ttk.Label(self, compound=tk.BOTTOM, anchor=tk.CENTER)
         self._lbl.pack(expand=True, fill=tk.BOTH)
         self._lbl.bind("<Configure>", self._render)
 
-        self.btn_zoom_m = ttk.Button(self, text="🔍−")
-        self.btn_zoom_m.pack(side=tk.LEFT)
-        self.btn_zoom_p = ttk.Button(self, text="🔍+")
-        self.btn_zoom_p.pack(side=tk.LEFT)
-        self.btn_zoom_p = ttk.Button(self, text="🔍 1:1")
-        self.btn_zoom_p.pack(side=tk.LEFT)
-        self.btn_zoom_p = ttk.Button(self, text="↷")
-        self.btn_zoom_p.pack(side=tk.LEFT)
-        self.btn_zoom_p = ttk.Button(self, text="↶")
-        self.btn_zoom_p.pack(side=tk.LEFT)
+        # Zoom controls
+        # self.btn_zoom_m = ttk.Button(self, text="🔍−")
+        # self.btn_zoom_m.pack(side=tk.LEFT)
+        # self.btn_zoom_p = ttk.Button(self, text="🔍+")
+        # self.btn_zoom_p.pack(side=tk.LEFT)
+        # self.btn_zoom_p = ttk.Button(self, text="🔍 1:1")
+        # self.btn_zoom_p.pack(side=tk.LEFT)
+        # self.btn_zoom_p = ttk.Button(self, text="↷")
+        # self.btn_zoom_p.pack(side=tk.LEFT)
+        # self.btn_zoom_p = ttk.Button(self, text="↶")
+        # self.btn_zoom_p.pack(side=tk.LEFT)
+        self.unset_image()
 
     def _render(self, event=None):
-        if self._img is not None:
+        if self:
+            # Keep aspect ratio
             image_ar = self._img.width / self._img.height
             widget_ar = self._lbl.winfo_width() / self._lbl.winfo_height()
             if widget_ar > image_ar:  # Height is limiting viewport
@@ -183,20 +186,21 @@ class ImageView(ttk.Frame):
             )
             self._img_tk = ImageTk.PhotoImage(preview)
             self._lbl["image"] = self._img_tk
-        else:
-            self._lbl["image"] = ""
 
-    def set_image(self, elo):
-        """Set RankFile or None."""
-        self.elo = elo
-
-        if self.elo:
-            self._lbl["text"] = self.elo.filename()
-            self._img = Image.open(self.elo.get_fp())
-        else:
-            self._lbl["text"] = "No image"
-            self._img = None
+    def set_image(self, rf):
+        self.model = rf
+        self._lbl["text"] = self.model.filename()
+        self._img = Image.open(self.model.get_fp())
         self._render()
+
+    def unset_image(self):
+        self.model = None
+        self._lbl["text"] = "No image"
+        self._img = None
+        self._lbl["image"] = ""
+
+    def __bool__(self):
+        return self.model is not None
 
     # def zoom(self, event=None):
     #     if self._img:
@@ -205,7 +209,7 @@ class ImageView(ttk.Frame):
     #     # self._img = self._img_tk.zoom(2)
 
 
-class RankFile:
+class RankFileModel:
     """Image data model (image path, Elo score).
 
     Defaults are magic numbers, I didn't validate it.
@@ -215,6 +219,9 @@ class RankFile:
         fp: File path
         score: Default Elo score for new unrated image
         k: Default max gain/loose per match
+
+    References:
+        [1] https://github.com/iain/elo?tab=readme-ov-file#label-About+the+K-factor
     """
 
     def __init__(
